@@ -8,6 +8,8 @@
 #include "Kismet/GameplayStatics.h"
 
 FString USaveManager::CurrentSaveSlot;
+TArray<TScriptInterface<ISaveInterface>> USaveManager::SaveInterfaces;
+
 static const FString kMetadataSaveSlot = "SaveGameMetadata";
 static const int32 kMaxSaveSlots = 100;
 
@@ -29,18 +31,49 @@ void USaveManager::Init()
 
 void USaveManager::QueryAllSaveInterfaces()
 {
-	// TODO
+	//Clear old entries
+	SaveInterfaces.Empty();
+
+	// Get all the actors that implement the save interface
+	TArray<AActor*> Actors;
+	UGameplayStatics::GetAllActorsWithInterface(GWorld, USaveInterface::StaticClass(), Actors);
+
+	for(AActor* Actor : Actors)
+	{
+		SaveInterfaces.Add(Actor);
+	}
 }
 
 void USaveManager::SaveGame()
 {
 	// Create a new save game data instance
-	USaveGameData* saveGameData = Cast<USaveGameData>( UGameplayStatics::CreateSaveGameObject(USaveGameData::StaticClass()));
+	USaveGameData* SaveGameData = Cast<USaveGameData>( UGameplayStatics::CreateSaveGameObject(USaveGameData::StaticClass()));
 
-	// TODO :: Go over all the actors that need to be saved and save them
+	// Go over all the actors that need to be saved and save them
+	for(auto& SaveInterface : SaveInterfaces)
+	{
+		if(SaveInterface.GetObject() == 0)
+		{
+			continue;
+		}
+		//Let the object know that it's about to be saved
+		SaveInterface->Execute_OnBeforeSave(SaveInterface.GetObject());
+		
+		//Find the object's save data using it's unique name
+		FString UniqueSaveName = SaveInterface->Execute_GetUniqueSaveName(SaveInterface.GetObject());
+		FSaveData& SaveData =  SaveGameData->SerializedData.Add(UniqueSaveName);
+
+		//Seralize:
+		FMemoryWriter MemoryWriter = FMemoryWriter(SaveData.Data);
+		//Telling that we are saving:
+		MemoryWriter.ArIsSaveGame = true;
+		
+		SaveInterface.GetObject()->Serialize(MemoryWriter);
+	}
+	
 
 	// Save the game to the current slot
-	UGameplayStatics::SaveGameToSlot(saveGameData, CurrentSaveSlot, 0);
+	UGameplayStatics::SaveGameToSlot(SaveGameData, CurrentSaveSlot, 0);
 
 	// Update the metadata file with the new slot
 	USaveGameMetadata* saveGameMetadata = Cast<USaveGameMetadata>( UGameplayStatics::LoadGameFromSlot(kMetadataSaveSlot, 0));
@@ -60,18 +93,41 @@ void USaveManager::SaveGame()
 
 void USaveManager::LoadGame()
 {
-	USaveGameData* saveGameData = Cast<USaveGameData>(  UGameplayStatics::LoadGameFromSlot(CurrentSaveSlot, 0));
+	USaveGameData* SaveGameData = Cast<USaveGameData>(  UGameplayStatics::LoadGameFromSlot(CurrentSaveSlot, 0));
 
-	if(saveGameData == nullptr)
+	if(SaveGameData == nullptr)
 	{
 		// No saves exist yet for this slot. SAve a default one.
 		SaveGame();
 
 		// Reload it
-		saveGameData = Cast<USaveGameData>(  UGameplayStatics::LoadGameFromSlot(CurrentSaveSlot, 0));
+		SaveGameData = Cast<USaveGameData>(  UGameplayStatics::LoadGameFromSlot(CurrentSaveSlot, 0));
 	}
 
-	//TODO:: Loop over all the actors that need to load data and load their data
+	// Loop over all the actors that need to load data and load their data
+	for (auto& SaveInterface : SaveInterfaces)
+	{
+		if(SaveInterface.GetObject() == nullptr)
+			{
+				continue;
+			}
+			//Find this object's unique and save data
+			FString UniqueSaveName = SaveInterface->Execute_GetUniqueSaveName(SaveInterface.GetObject());
+			FSaveData* SaveData =  SaveGameData->SerializedData.Find(UniqueSaveName);
+	
+		if(SaveData == nullptr)
+		{
+			continue;
+		}
+		//Deserialize the object's save data
+		FMemoryReader MemoryReader(SaveData->Data);
+		MemoryReader.ArIsSaveGame = false;
+
+		SaveInterface.GetObject()->Serialize(MemoryReader);
+		
+	}
+
+	
 	if(GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Cyan, "Loaded: " + CurrentSaveSlot);

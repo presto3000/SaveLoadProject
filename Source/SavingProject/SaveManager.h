@@ -3,6 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+
+#include "SaveInterface.h"
 #include "SaveMetadata.h"
 #include "UObject/NoExportTypes.h"
 #include "SaveManager.generated.h"
@@ -18,6 +20,10 @@ class SAVINGPROJECT_API USaveManager : public UObject
 private:
 	// The current save slot // static var should be Decleared in Cpp too
 	static FString CurrentSaveSlot;
+
+	// All the actors in the game which implement the save interface
+	// For INTERFACES ARRAY WE NEED TO ADD IN FRONT <TScriptInterface>
+	static TArray<TScriptInterface<ISaveInterface>> SaveInterfaces;
 
 public:
 	// Initialize the class. Must be called when the game first launches
